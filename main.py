@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 import uvicorn
-from iris.router import iris_classifier_router
 
 app = FastAPI()
 
