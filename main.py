@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 import uvicorn
+from iris.router import iris_classifier_router
 
 app = FastAPI()
 
@@ -33,5 +34,3 @@ def delete(city: int):
     db.remove(db[city])
 
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
