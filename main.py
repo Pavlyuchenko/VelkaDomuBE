@@ -85,5 +85,9 @@ admin.add_view(ModelView(Autor, db.session))
 admin.add_view(ModelView(Stitek, db.session))
 
 
+@app.route('/')
+def main():
+    return "Hello!"
+
 if __name__ == "__main__":
-    app.run()
+    app.run(threaded=True, port = int(os.environ.get('PORT', 5000)))
