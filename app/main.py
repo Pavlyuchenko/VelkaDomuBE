@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
@@ -6,6 +6,7 @@ from flask_cors import CORS, cross_origin
 
 
 from datetime import datetime
+import json
 
 
 app = Flask(__name__)
@@ -67,6 +68,24 @@ class Clanek(db.Model):
         }
 
 
+class JavascriptClanek(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    titulek = db.Column(db.Text)
+    podnadpis = db.Column(db.Text)
+    url_obrazku = db.Column(db.Text)
+    blocks = db.Column(db.Text)
+
+    def jsonify(self):
+        return {
+            "id": self.id,
+            "titulek": self.titulek,
+            "podnadpis": self.podnadpis,
+            "urlObrazek": self.url_obrazku,
+            "blocks": self.blocks,
+        }
+
+
 class Rychlovka(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
@@ -119,10 +138,11 @@ admin.add_view(NewClanekView(Clanek, db.session))
 admin.add_view(ModelView(Rychlovka, db.session))
 admin.add_view(ModelView(Autor, db.session))
 admin.add_view(ModelView(Stitek, db.session))
+admin.add_view(ModelView(JavascriptClanek, db.session))
 
 
-@app.route("/main", methods=["GET"])
-@cross_origin()
+@ app.route("/main", methods=["GET"])
+@ cross_origin()
 def main():
     clanky = Clanek.query.order_by(Clanek.datum.desc()).all()
 
@@ -131,12 +151,52 @@ def main():
     return jsonify(clanky_res)
 
 
-@app.route("/clanek/<int:clanek_id>", methods=["GET"])
-@cross_origin()
+@ app.route("/clanek/<int:clanek_id>", methods=["GET"])
+@ cross_origin()
 def clanek(clanek_id):
     clanek = Clanek.query.filter_by(id=clanek_id).first()
 
     return jsonify(clanek.jsonify())
+
+
+@ app.route("/save_clanek", methods=["POST"])
+@ cross_origin()
+def save_clanek():
+    data = request.json
+
+    draft = JavascriptClanek.query.filter_by(id=data["id"]).first()
+
+    if draft:
+        draft.titulek = data['titulek']
+        draft.podnadpis = data['podnadpis']
+        draft.url_obrazku = data['urlObrazku']
+        draft.blocks = json.dumps(data['blocks'])
+    else:
+        saved = JavascriptClanek(titulek=data['titulek'], podnadpis=data['podnadpis'],
+                                 url_obrazku=data['urlObrazku'], blocks=json.dumps(data['blocks']))
+        db.session.add(saved)
+
+    db.session.commit()
+
+    return "200"
+
+
+@ app.route("/drafts", methods=["GET"])
+@ cross_origin()
+def drafts():
+    drafts = JavascriptClanek.query.order_by(JavascriptClanek.id.desc()).all()
+
+    drafts_res = [x.jsonify() for x in drafts]
+
+    return jsonify(drafts_res)
+
+
+@ app.route("/draft/<int:draft_id>", methods=["GET"])
+@ cross_origin()
+def cladraftnek(draft_id):
+    draft = JavascriptClanek.query.filter_by(id=draft_id).first()
+
+    return jsonify(draft.jsonify())
 
 
 if __name__ == "__main__":
