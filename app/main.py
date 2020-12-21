@@ -214,6 +214,14 @@ def draft(draft_id):
         return jsonify(titulek="None")
 
 
+@ app.route("/delete_draft/<int:draft_id>", methods=["GET"])
+@ cross_origin()
+def delete_draft(draft_id):
+    draft = Draft.query.filter_by(id=draft_id).delete()
+    db.session.commit()
+    return "200"
+
+
 if __name__ == "__main__":
     app.run(port=8000)
     # app.run(threaded=True, port=int(os.environ.get("PORT", 5000))) # Heroku
