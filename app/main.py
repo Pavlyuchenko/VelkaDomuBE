@@ -33,7 +33,7 @@ class Clanek(db.Model):
     body = db.Column(db.Text, unique=True, nullable=False)
     main_image = db.Column(db.String(9999), nullable=False)
 
-    datum = db.Column(db.DateTime, default=datetime.utcnow)
+    datum = db.Column(db.DateTime, default=datetime.now)
 
     autor = db.Column(db.Integer, db.ForeignKey("autor.id"))
     stitky = db.relationship(
@@ -68,13 +68,16 @@ class Clanek(db.Model):
         }
 
 
-class JavascriptClanek(db.Model):
+class Draft(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     titulek = db.Column(db.Text)
     podnadpis = db.Column(db.Text)
     url_obrazku = db.Column(db.Text)
     blocks = db.Column(db.Text)
+
+    time_saved = db.Column(db.DateTime, default=datetime.now)
+    autor = db.Column(db.Integer, db.ForeignKey("autor.id"))
 
     def jsonify(self):
         return {
@@ -83,6 +86,8 @@ class JavascriptClanek(db.Model):
             "podnadpis": self.podnadpis,
             "urlObrazek": self.url_obrazku,
             "blocks": self.blocks,
+            "time_saved": self.time_saved.strftime("%d. %m. %Y (%H:%M)"),
+            "autor": self.author.__repr__()
         }
 
 
@@ -92,7 +97,7 @@ class Rychlovka(db.Model):
     titulek = db.Column(db.String(200), unique=False, nullable=False)
     body = db.Column(db.Text, unique=True, nullable=False)
 
-    datum = db.Column(db.DateTime, default=datetime.utcnow)
+    datum = db.Column(db.DateTime, default=datetime.now)
 
 
 class Autor(db.Model):
@@ -101,9 +106,10 @@ class Autor(db.Model):
     jmeno = db.Column(db.String(1000), unique=False, nullable=False)
 
     clanek = db.relationship("Clanek", backref="author")
+    draft = db.relationship("Draft", backref="author")
 
     def __repr__(self):
-        return self.jmeno
+        return '{"id": ' + str(self.id) + ', "jmeno": "' + self.jmeno + '"}'
 
 
 class Stitek(db.Model):
@@ -138,7 +144,7 @@ admin.add_view(NewClanekView(Clanek, db.session))
 admin.add_view(ModelView(Rychlovka, db.session))
 admin.add_view(ModelView(Autor, db.session))
 admin.add_view(ModelView(Stitek, db.session))
-admin.add_view(ModelView(JavascriptClanek, db.session))
+admin.add_view(ModelView(Draft, db.session))
 
 
 @ app.route("/main", methods=["GET"])
@@ -164,16 +170,22 @@ def clanek(clanek_id):
 def save_clanek():
     data = request.json
 
-    draft = JavascriptClanek.query.filter_by(id=data["id"]).first()
+    draft = Draft.query.filter_by(id=data["id"]).first()
 
     if draft:
         draft.titulek = data['titulek']
         draft.podnadpis = data['podnadpis']
         draft.url_obrazku = data['urlObrazku']
         draft.blocks = json.dumps(data['blocks'])
+
+        autor = Autor.query.filter_by(id=int(data["autor"])).first()
+        draft.autor = autor.id
+        draft.time_saved = datetime.now()
     else:
-        saved = JavascriptClanek(titulek=data['titulek'], podnadpis=data['podnadpis'],
-                                 url_obrazku=data['urlObrazku'], blocks=json.dumps(data['blocks']))
+        autor = Autor.query.filter_by(id=int(data["autor"])).first()
+
+        saved = Draft(titulek=data['titulek'], podnadpis=data['podnadpis'],
+                      url_obrazku=data['urlObrazku'], blocks=json.dumps(data['blocks']), autor=autor.id)
         db.session.add(saved)
 
     db.session.commit()
@@ -184,7 +196,7 @@ def save_clanek():
 @ app.route("/drafts", methods=["GET"])
 @ cross_origin()
 def drafts():
-    drafts = JavascriptClanek.query.order_by(JavascriptClanek.id.desc()).all()
+    drafts = Draft.query.order_by(Draft.time_saved.desc()).all()
 
     drafts_res = [x.jsonify() for x in drafts]
 
@@ -193,10 +205,13 @@ def drafts():
 
 @ app.route("/draft/<int:draft_id>", methods=["GET"])
 @ cross_origin()
-def cladraftnek(draft_id):
-    draft = JavascriptClanek.query.filter_by(id=draft_id).first()
+def draft(draft_id):
+    draft = Draft.query.filter_by(id=draft_id).first()
 
-    return jsonify(draft.jsonify())
+    if draft:
+        return jsonify(draft.jsonify())
+    else:
+        return jsonify(titulek="None")
 
 
 if __name__ == "__main__":
