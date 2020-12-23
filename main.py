@@ -41,6 +41,7 @@ class Clanek(db.Model):
         secondary=tags,
         backref=db.backref("stitky", lazy="dynamic"),
     )
+    dalsi_stitky = db.Column(db.Text, unique=False, nullable=True)
 
     def __repr__(self):
         return "<Clanek %r>" % self.titulek
@@ -75,8 +76,11 @@ class Draft(db.Model):
     podnadpis = db.Column(db.Text)
     url_obrazku = db.Column(db.Text)
     blocks = db.Column(db.Text)
+    zadost_o_potvrzeni = db.Column(db.Boolean, default=False)
+    vydan = db.Column(db.Boolean, default=False)
 
     time_saved = db.Column(db.DateTime, default=datetime.now)
+
     autor = db.Column(db.Integer, db.ForeignKey("autor.id"))
 
     def jsonify(self):
@@ -87,7 +91,7 @@ class Draft(db.Model):
             "urlObrazek": self.url_obrazku,
             "blocks": self.blocks,
             "time_saved": self.time_saved.strftime("%d. %m. %Y (%H:%M)"),
-            "autor": self.author.__repr__()
+            "autor": self.author.__repr__(),
         }
 
 
@@ -111,6 +115,9 @@ class Autor(db.Model):
     def __repr__(self):
         return '{"id": ' + str(self.id) + ', "jmeno": "' + self.jmeno + '"}'
 
+    def jsonify(self):
+        return {"id": self.id, "jmeno": self.jmeno}
+
 
 class Stitek(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -123,6 +130,9 @@ class Stitek(db.Model):
 
     def __repr__(self):
         return self.nazev
+
+    def jsonify(self):
+        return {"id": self.id, "nazev": self.nazev, "color": self.color}
 
 
 # Admin views
@@ -147,8 +157,8 @@ admin.add_view(ModelView(Stitek, db.session))
 admin.add_view(ModelView(Draft, db.session))
 
 
-@ app.route("/main", methods=["GET"])
-@ cross_origin()
+@app.route("/main", methods=["GET"])
+@cross_origin()
 def main():
     clanky = Clanek.query.order_by(Clanek.datum.desc()).all()
 
@@ -157,26 +167,22 @@ def main():
     return jsonify(clanky_res)
 
 
-@ app.route("/clanek/<int:clanek_id>", methods=["GET"])
-@ cross_origin()
+@app.route("/clanek/<int:clanek_id>", methods=["GET"])
+@cross_origin()
 def clanek(clanek_id):
     clanek = Clanek.query.filter_by(id=clanek_id).first()
 
     return jsonify(clanek.jsonify())
 
 
-@ app.route("/save_clanek", methods=["POST"])
-@ cross_origin()
-def save_clanek():
-    data = request.json
-
+def _save_draft(data):
     draft = Draft.query.filter_by(id=data["id"]).first()
 
     if draft:
-        draft.titulek = data['titulek']
-        draft.podnadpis = data['podnadpis']
-        draft.url_obrazku = data['urlObrazku']
-        draft.blocks = json.dumps(data['blocks'])
+        draft.titulek = data["titulek"]
+        draft.podnadpis = data["podnadpis"]
+        draft.url_obrazku = data["urlObrazku"]
+        draft.blocks = json.dumps(data["blocks"])
 
         autor = Autor.query.filter_by(id=int(data["autor"])).first()
         draft.autor = autor.id
@@ -184,38 +190,152 @@ def save_clanek():
     else:
         autor = Autor.query.filter_by(id=int(data["autor"])).first()
 
-        saved = Draft(titulek=data['titulek'], podnadpis=data['podnadpis'],
-                      url_obrazku=data['urlObrazku'], blocks=json.dumps(data['blocks']), autor=autor.id)
-        db.session.add(saved)
+        draft = Draft(
+            titulek=data["titulek"],
+            podnadpis=data["podnadpis"],
+            url_obrazku=data["urlObrazku"],
+            blocks=json.dumps(data["blocks"]),
+            autor=autor.id,
+        )
+        db.session.add(draft)
+    db.session.commit()
+    return draft
 
+
+@app.route("/save_draft", methods=["POST"])
+@cross_origin()
+def save_draft():
+    data = request.json
+
+    _save_draft(data)
+
+    return "200"
+
+
+@app.route("/save_draft_and_potvrdit", methods=["POST"])
+@cross_origin()
+def save_draft_and_potvrdit():
+    data = request.json
+
+    draft = _save_draft(
+        data,
+    )
+    draft.zadost_o_potvrzeni = not draft.zadost_o_potvrzeni
     db.session.commit()
 
     return "200"
 
 
-@ app.route("/drafts", methods=["GET"])
-@ cross_origin()
+def _create_clanek(blocks):
+    res = ""
+    for i in blocks:
+        if i["type"] == "p":
+            res += (
+                "<p>"
+                + i["content"]
+                .replace("@", "<b>")
+                .replace("/@", "</b>")
+                .replace("&", "<i>")
+                .replace("/&", "</i>")
+                + "</p>"
+            )
+        elif i["type"] == "h1":
+            res += "<h3>" + i["content"] + "</h3>"
+        elif i["type"] == "h2":
+            res += "<h4>" + i["content"] + "</h4>"
+        elif i["type"] == "h3":
+            res += "<h5>" + i["content"] + "</h5>"
+        elif i["type"] == "odrazka":
+            res += "<div class='odrazka'>" + i["content"] + "</div>"
+        elif i["type"] == "citace":
+            res += "<div class='citace'>" + i["content"] + "</div>"
+        elif i["type"] == "zvyrazneni":
+            res += "<div class='zvyrazneni'>" + i["content"] + "</div>"
+        elif i["type"] == "obrazek":
+            res += "<img href='" + i["url"] + "' alt='whatever' />"
+
+    return res
+
+
+@app.route("/create_clanek", methods=["POST"])
+@cross_origin()
+def create_clanek():
+    data = request.json
+
+    body = data["blocks"]
+
+    res = _create_clanek(body)
+
+    print(data)
+
+    stitek = Stitek.query.filter(Stitek.id == data["stitek"]).first()
+
+    clanek = Clanek(
+        titulek=data["titulek"],
+        podnadpis=data["podnadpis"],
+        body=res,
+        main_image=data["urlObrazku"],
+        autor=data["autor"],
+        stitky=[stitek],
+        dalsi_stitky=data["dalsiStitky"],
+    )
+    db.session.add(clanek)
+    db.session.commit()
+
+    return jsonify(res=res)
+
+
+@app.route("/drafts", methods=["GET"])
+@cross_origin()
 def drafts():
-    drafts = Draft.query.order_by(Draft.time_saved.desc()).all()
+    drafts = (
+        Draft.query.filter(Draft.zadost_o_potvrzeni == False, Draft.vydan == False)
+        .order_by(Draft.time_saved.desc())
+        .all()
+    )
+
+    if drafts:
+        drafts_last_id = Draft.query.all()[-1].id
+    else:
+        drafts_last_id = 0
+
+    drafts_res = [x.jsonify() for x in drafts]
+
+    return jsonify(drafts=drafts_res, next=drafts_last_id)
+
+
+@app.route("/drafts_kontrola", methods=["GET"])
+@cross_origin()
+def drafts_kontrola():
+    drafts = (
+        Draft.query.filter(Draft.zadost_o_potvrzeni == True, Draft.vydan == False)
+        .order_by(Draft.time_saved.desc())
+        .all()
+    )
 
     drafts_res = [x.jsonify() for x in drafts]
 
     return jsonify(drafts_res)
 
 
-@ app.route("/draft/<int:draft_id>", methods=["GET"])
-@ cross_origin()
+@app.route("/draft/<int:draft_id>", methods=["GET"])
+@cross_origin()
 def draft(draft_id):
     draft = Draft.query.filter_by(id=draft_id).first()
 
+    autors = [x.jsonify() for x in Autor.query.all()]
+    stitky = [x.jsonify() for x in Stitek.query.all()]
+
+    print(stitky)
+
     if draft:
-        return jsonify(draft.jsonify())
+        return jsonify(draft=draft.jsonify(), autors=autors, stitky=stitky)
     else:
-        return jsonify(titulek="None")
+        return jsonify(titulek="None", autors=autors, stitky=stitky)
 
 
-@ app.route("/delete_draft/<int:draft_id>", methods=["GET"])
-@ cross_origin()
+@app.route("/delete_draft/<int:draft_id>", methods=["GET"])
+@cross_origin()
 def delete_draft(draft_id):
     draft = Draft.query.filter_by(id=draft_id).delete()
     db.session.commit()
